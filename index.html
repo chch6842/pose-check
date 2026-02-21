@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 姿勢檢測</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    
+    <style>
+        body { margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; background-color: #333; color: white; font-family: sans-serif; }
+        #status-bar { width: 100%; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; background-color: #555; transition: background-color 0.3s; }
+        .container { position: relative; width: 100%; max-width: 640px; margin-top: 20px; }
+        /* 隱藏原始影片，我們只顯示畫上骨架的 Canvas */
+        video { display: none; }
+        canvas { width: 100%; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+
+    <div id="status-bar">請站在鏡頭前...</div>
+
+    <div class="container">
+        <video id="input_video" autoplay playsinline></video>
+        <canvas id="output_canvas" width="640" height="480"></canvas>
+    </div>
+
+    <script>
+        // 取得網頁元素
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusBar = document.getElementById('status-bar');
+
+        // 當 MediaPipe 處理完每一張畫面時，會執行這個函式
+        function onResults(results) {
+            // 1. 畫出背景畫面
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            // 2. 如果有抓到人體骨架
+            if (results.poseLandmarks) {
+                // 畫出骨架線條
+                window.drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                window.drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2});
+
+                // 3. 抓取關鍵點的 Y 座標 (0 是頭頂，1 是腳底)
+                const leftShoulder = results.poseLandmarks[11].y;
+                const rightShoulder = results.poseLandmarks[12].y;
+                const leftElbow = results.poseLandmarks[13].y;
+                const rightElbow = results.poseLandmarks[14].y;
+
+                // 4. 判斷邏輯：只要有一隻手的手肘，高於同側的肩膀 (Y值較小)，就算舉手
+                if (leftElbow < leftShoulder || rightElbow < rightShoulder) {
+                    statusBar.innerText = "🙌 動作達標 (Hands Up)!";
+                    statusBar.style.backgroundColor = "#28a745"; // 綠色
+                } else {
+                    statusBar.innerText = "請舉起手...";
+                    statusBar.style.backgroundColor = "#555"; // 灰色
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        // 初始化 MediaPipe Pose 模型
+        const pose = new Pose({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+        }});
+        pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        pose.onResults(onResults);
+
+        // 啟動攝影機並傳入畫面
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await pose.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
+    </script>
+</body>
+</html>
