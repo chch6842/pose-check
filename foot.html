@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Curves AI - 足部穩定偵測</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    
+    <style>
+        body { margin: 0; background-color: #1a1a1a; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; }
+        #status-bar { width: 100%; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; background-color: #333; }
+        canvas { width: 90%; max-width: 640px; border-radius: 10px; margin-top: 10px; }
+        
+        /* 免責聲明彈窗 */
+        #disclaimer-modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); display: flex; justify-content: center; align-items: center; z-index: 999;
+        }
+        .modal-content {
+            background: #fff; color: #333; padding: 30px; border-radius: 15px; width: 80%; max-width: 400px; text-align: center;
+        }
+        .modal-content h2 { color: #e74c3c; }
+        .modal-content p { font-size: 14px; line-height: 1.6; text-align: left; }
+        button#agree-btn { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+    <div id="disclaimer-modal">
+        <div class="modal-content">
+            <h2>⚠️ 重要聲明</h2>
+            <p>本系統所提供之數據僅供參考，不具備醫療或專業診斷建議。使用者應自行評估身體狀況，若因系統數據產生之任何意外，開發者不負損害賠償責任。</p>
+            <button id="agree-btn">我已了解並同意</button>
+        </div>
+    </div>
+
+    <div id="status-bar">請將鏡頭對準腳部...</div>
+    <video id="input_video" style="display:none"></video>
+    <canvas id="output_canvas" width="640" height="480"></canvas>
+
+    <script>
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusBar = document.getElementById('status-bar');
+
+        // 免責聲明邏輯
+        document.getElementById('agree-btn').addEventListener('click', () => {
+            document.getElementById('disclaimer-modal').style.display = 'none';
+            startCamera();
+        });
+
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.poseLandmarks) {
+                // 畫出關鍵點 (只畫腳部)
+                const footPoints = [27, 28, 29, 30, 31, 32];
+                footPoints.forEach(i => {
+                    const lm = results.poseLandmarks[i];
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(lm.x * canvasElement.width, lm.y * canvasElement.height, 5, 0, 2 * Math.PI);
+                    canvasCtx.fillStyle = "#00FF00";
+                    canvasCtx.fill();
+                });
+
+                // 邏輯：偵測腳踝 (27) 相對於腳尖 (31) 與腳跟 (29) 的水平偏移
+                // 這是一個簡化的足踝偏移算法
+                const leftAnkle = results.poseLandmarks[27];
+                const leftHeel = results.poseLandmarks[29];
+                const leftToe = results.poseLandmarks[31];
+
+                const ankleOffset = leftAnkle.x - (leftHeel.x + leftToe.x) / 2;
+
+                if (Math.abs(ankleOffset) > 0.05) { // 偏移閾值
+                    statusBar.innerText = "⚠️ 偵測到足踝不穩/塌陷";
+                    statusBar.style.backgroundColor = "#e74c3c";
+                } else {
+                    statusBar.innerText = "✅ 足部支撐良好";
+                    statusBar.style.backgroundColor = "#28a745";
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+        pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
+        pose.onResults(onResults);
+
+        function startCamera() {
+            const camera = new Camera(videoElement, {
+                onFrame: async () => { await pose.send({image: videoElement}); },
+                width: 640, height: 480
+            });
+            camera.start();
+        }
+    </script>
+</body>
+</html>
